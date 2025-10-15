@@ -1,0 +1,73 @@
+image: python:3.10
+
+stages:
+  - build
+  - test
+  - metrics
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIPELINE_START_TIME: "$CI_PIPELINE_CREATED_AT"
+
+cache:
+  paths:
+    - .cache/pip
+
+before_script:
+  - python --version
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
+
+#  STAGE 1: BUILD
+build_job:
+  stage: build
+  script:
+    - echo "Iniciando compilación del proyecto Calculadora..."
+    - start_time=$(date +%s)
+    - python -m py_compile src/*.py
+    - end_time=$(date +%s)
+    - echo "BUILD_TIME=$((end_time - start_time))" > build_metrics.env
+  artifacts:
+    reports:
+      dotenv: build_metrics.env
+    expire_in: 1 week
+
+#  STAGE 2: TEST Y CODE COVERAGE
+test_job:
+  stage: test
+  script:
+    - echo "Ejecutando pruebas unitarias..."
+    - pip install pytest pytest-cov
+    - pytest --cov=src --cov-report=term-missing --cov-report=xml
+    - coverage=$(pytest --cov=src --cov-report=term | grep "TOTAL" | awk '{print $4}')
+    - echo "CODE_COVERAGE=$coverage" > coverage_metrics.env
+  artifacts:
+    reports:
+      junit: test-results.xml
+      dotenv: coverage_metrics.env
+    paths:
+      - coverage.xml
+    expire_in: 1 week
+  dependencies:
+    - build_job
+
+#  STAGE 3: MÉTRICAS
+metrics_job:
+  stage: metrics
+  script:
+    - echo "==========  MÉTRICAS DE CALIDAD =========="
+    - echo "Cobertura de código (Code Coverage): $CODE_COVERAGE"
+    - echo "Tiempo de construcción (Build Time): $BUILD_TIME segundos"
+    - echo "Calculando Lead Time..."
+    - start=$(date -d "$PIPELINE_START_TIME" +%s)
+    - end=$(date +%s)
+    - echo "Lead Time total: $((end - start)) segundos desde el commit hasta el fin del pipeline"
+    - echo "==========================================="
+  dependencies:
+    - build_job
+    - test_job
+  artifacts:
+    paths:
+      - build_metrics.env
+      - coverage_metrics.env
+    expire_in: 1 week
